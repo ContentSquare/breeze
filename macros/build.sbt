@@ -32,8 +32,6 @@ libraryDependencies ++= Seq(
 
 libraryDependencies <+= (scalaVersion)("org.scala-lang" % "scala-reflect" % _)
 
-credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")
-
 scalacOptions ++= Seq("-deprecation", "-language:_", "-optimize")
 
 javaOptions += "-Xmx2g"
@@ -68,10 +66,13 @@ pomExtra := (
 publishMavenStyle := true
 
 
-  publishTo <<= version { (v: String) =>
-    val nexus = "https://oss.sonatype.org/"
-    if (v.trim.endsWith("SNAPSHOT"))
-      Some("snapshots" at nexus + "content/repositories/snapshots")
-    else
-      Some("releases"  at nexus + "service/local/staging/deploy/maven2")
-  }
+publishTo <<= version { (v: String) =>
+  val nexus = "http://maven.csq.io/artifactory/"
+  val realm = "Artifactory realm"
+  if (v.trim.endsWith("SNAPSHOT"))
+    Some(realm at nexus + "libs-snapshot-local")
+  else
+    Some(realm  at nexus + "libs-release-local")
+}
+
+credentials += Credentials(Path.userHome / ".sbt" / ".credentials")
