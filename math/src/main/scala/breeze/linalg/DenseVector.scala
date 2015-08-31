@@ -91,16 +91,7 @@ class DenseVector[@spec(Double, Int, Float, Long) V](val data: Array[V],
   override def equals(p1: Any) = p1 match {
     case y: DenseVector[_] =>
       y.length == length && ArrayUtil.nonstupidEquals(data, offset, stride, length, y.data, y.offset, y.stride, y.length)
-    case x: Vector[_] =>
-//      length == x.length && (( stride == x.stride
-//        && offset == x.offset
-//        && data.length == x.data.length
-//        && ArrayUtil.equals(data, x.data)
-//      )  ||  (
-          valuesIterator sameElements x.valuesIterator
-//        ))
-
-    case _ => false
+    case _ => super.equals(p1)
   }
 
   override def toString = {
@@ -161,12 +152,16 @@ class DenseVector[@spec(Double, Int, Float, Long) V](val data: Array[V],
    * @tparam U
    */
   override def foreach[@spec(Unit) U](fn: (V) => U): Unit = {
-    var i = offset
-    var j = 0
-    while(j < length) {
-      fn(data(i))
-      i += stride
-      j += 1
+    if (stride == 1) { // ABCE stuff
+      cforRange(offset until (offset + length)) { j =>
+        fn(data(j))
+      }
+    } else {
+      var i = offset
+      cforRange(0 until length) { j =>
+        fn(data(i))
+        i += stride
+      }
     }
   }
 
@@ -397,25 +392,19 @@ object DenseVector extends VectorConstructors[DenseVector]
     new CanTransformValues[DenseVector[V], V] {
       def transform(from: DenseVector[V], fn: (V) => V) {
         val d = from.data
+        val length = from.length
         val stride = from.stride
 
         val offset = from.offset
         if (stride == 1)  {
-          if (offset == 0) {
-            cforRange(0 until d.length) { j =>
-              d(j) = fn(d(j))
-            }
-          } else {
-            cforRange(offset until offset + from.size) { j =>
-              d(j - offset) = fn(d(j))
-            }
+          cforRange(offset until offset + length) { j =>
+            d(j) = fn(d(j))
           }
         } else {
-          var i = 0
+          val end = offset + stride * length
           var j = offset
-          while(i < from.length) {
+          while (j != end) {
             d(j) = fn(d(j))
-            i += 1
             j += stride
           }
 
@@ -590,19 +579,35 @@ object DenseVector extends VectorConstructors[DenseVector]
   }
   implicitly[BinaryRegistry[Vector[Double], Vector[Double], OpSub.type, Vector[Double]]].register(canSubD)
 
-  implicit val canDotD: OpMulInner.Impl2[DenseVector[Double], DenseVector[Double], Double] = {
-    new OpMulInner.Impl2[DenseVector[Double], DenseVector[Double], Double] {
-      def apply(a: DenseVector[Double], b: DenseVector[Double]) = {
-        require(a.length == b.length, s"Vectors must have same length: ${a.length} != ${b.length}")
+  implicit object canDotD extends OpMulInner.Impl2[DenseVector[Double], DenseVector[Double], Double] {
+    def apply(a: DenseVector[Double], b: DenseVector[Double]) = {
+      require(a.length == b.length, s"Vectors must have same length: ${a.length} != ${b.length}")
+      if (a.length < 200) { // benchmarks suggest breakeven point is around length 200
+        if (a.offset == 0 && b.offset == 0 && a.stride == 1 && b.stride == 1) {
+          DenseVectorSupportMethods.smallDotProduct_Double(a.data, b.data, a.length);
+          //            val ad = a.data
+          //            val bd = b.data
+          //            var sum = 0.0
+          //            cforRange(0 until a.length) { i =>
+          //              sum += ad(i) * bd(i)
+          //            }
+          //            sum
+        } else {
+          var sum = 0.0
+          cforRange(0 until a.length) { i =>
+            sum += a(i) * b(i)
+          }
+          sum
+        }
+      } else {
         val boff = if (b.stride >= 0) b.offset else (b.offset + b.stride * (b.length - 1))
         val aoff = if (a.stride >= 0) a.offset else (a.offset + a.stride * (a.length - 1))
         blas.ddot(
           a.length, b.data, boff, b.stride, a.data, aoff, a.stride)
       }
-      implicitly[BinaryRegistry[Vector[Double], Vector[Double], OpMulInner.type, Double]].register(this)
     }
-
   }
+  implicitly[BinaryRegistry[Vector[Double], Vector[Double], OpMulInner.type, Double]].register(canDotD)
 
   implicit val canScaleIntoD: OpMulScalar.InPlaceImpl2[DenseVector[Double], Double] = {
     new OpMulScalar.InPlaceImpl2[DenseVector[Double], Double] {
